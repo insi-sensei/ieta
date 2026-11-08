@@ -207,7 +207,9 @@ async function api(path, options = {}) {
 let hasServer = false;
 async function detectServer() {
   try {
-    const res = await fetch(`${API_BASE}/api/health`, { cache: "no-store" });
+    const options = { cache: "no-store" };
+    if (AbortSignal.timeout) options.signal = AbortSignal.timeout(3000);
+    const res = await fetch(`${API_BASE}/api/health`, options);
     hasServer = res.ok && (await res.json()).ok === true;
   } catch (e) {
     hasServer = false;
@@ -294,29 +296,52 @@ function ring(part, whole, ...center) {
 
 let onHome = false;
 function show(...nodes) {
+  const tabs = nodes.find((n) => n && n.tabKey);
   onHome = false;
   app.classList.remove("wide");
-  app.classList.toggle("with-tabs", nodes.some((n) => n && n.classList && n.classList.contains("tabbar")));
+  app.classList.toggle("with-tabs", Boolean(tabs));
+  updateTabs(tabs ? tabs.tabKey : null);
   document.onkeydown = null;
-  app.replaceChildren(...nodes.filter(Boolean));
+  app.replaceChildren(...nodes.filter((n) => n && !n.tabKey));
   window.scrollTo(0, 0);
 }
 
 // 画面の下のタブ。ホーム・貼る・単語帳・設定を1タップで切り替える。
-function tabBar(active) {
-  const waiting = state.cards.filter((c) => !Logic.isReady(c)).length;
-  const tab = (id, key, name, label, onclick, badge) => h("button", {
-    class: `tab${active === key ? " on" : ""}`,
-    id,
-    "aria-current": active === key ? "page" : "false",
-    onclick,
-  }, icon(name), h("span", {}, label), badge ? h("span", { class: "badge" }, String(badge)) : null);
-  return h("nav", { class: "tabbar", "aria-label": "メニュー" },
-    tab("tab-home", "home", "home", "ホーム", renderHome),
-    tab("paste", "paste", "paste", "貼る", renderPaste),
-    tab("list", "list", "book", "単語帳", () => renderList(waiting > 0 ? "todo" : "all"), waiting),
-    tab("settings", "settings", "gear", "設定", renderSettings));
+// 1回だけ作って画面の外側に置き、切り替えのときは光る場所と数字だけを変える。
+// （画面を変えるたびに作り直すと、iPhoneでは一瞬ずれて震えて見える）
+const waitingCount = () => state.cards.filter((c) => !Logic.isReady(c)).length;
+let tabNav = null;
+const tabButtons = {};
+
+function buildTabNav() {
+  const tab = (key, id, name, label, onclick) => {
+    const badge = h("span", { class: "badge", hidden: "" });
+    tabButtons[key] = { btn: h("button", { class: "tab", id, onclick }, icon(name), h("span", {}, label), badge), badge };
+    return tabButtons[key].btn;
+  };
+  tabNav = h("nav", { class: "tabbar", "aria-label": "メニュー", hidden: "" },
+    tab("home", "tab-home", "home", "ホーム", () => renderHome()),
+    tab("paste", "paste", "paste", "貼る", () => renderPaste()),
+    tab("list", "list", "book", "単語帳", () => renderList(waitingCount() > 0 ? "todo" : "all")),
+    tab("settings", "settings", "gear", "設定", () => renderSettings()));
+  document.body.append(tabNav);
 }
+
+function updateTabs(active) {
+  if (!tabNav) buildTabNav();
+  tabNav.hidden = !active;
+  if (!active) return;
+  for (const [key, { btn }] of Object.entries(tabButtons)) {
+    btn.classList.toggle("on", key === active);
+    btn.setAttribute("aria-current", key === active ? "page" : "false");
+  }
+  const waiting = waitingCount();
+  tabButtons.list.badge.textContent = String(waiting);
+  tabButtons.list.badge.hidden = waiting === 0;
+}
+
+// 画面の最後に渡すと、その画面でタブを出す。
+const tabBar = (active) => ({ tabKey: active });
 
 function greeting() {
   const hour = new Date().getHours();
@@ -1075,10 +1100,14 @@ document.addEventListener("visibilitychange", () => {
   // iPhoneは裏に回ったアプリをすぐ止めることがあるので、その前に控えを残す。
   else writeSnapshot();
 });
-renderHome();
+const firstVisit = !onboarded() && state.cards.length === 0;
+if (!firstVisit) renderHome();
 Promise.all([recover(), recoverToken(), detectServer()]).then(() => {
-  if (onHome && !onboarded() && state.cards.length === 0) renderOnboarding();
-  else if (onHome) renderHome();
+  // データが変わったときの描き直しは recover() が行うので、ここでは描き直さない。
+  if (firstVisit) {
+    if (state.cards.length === 0) renderOnboarding();
+    else renderHome();
+  }
   writeSnapshot();
   sync();
 });
