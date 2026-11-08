@@ -490,7 +490,8 @@ function renderOnboarding() {
 }
 
 // ---- 会話を貼る → Geminiの答えからカードを作る ----
-// iPhoneはアプリを切り替えると画面が閉じることがあるので、2つの手順を同じ画面に置く。
+// 依頼文はアプリに組み込んである。使う人は「Geminiで分析する」と「答えを貼る」の2回押すだけ。
+// iPhoneはアプリを切り替えると画面が閉じることがあるので、2つの手順を同じ画面に置き、下書きも残す。
 function renderPaste() {
   const transcript = h("textarea", {
     class: "paste",
@@ -501,10 +502,10 @@ function renderPaste() {
     "aria-label": "英会話の記録",
   });
   const reply = h("textarea", {
-    class: "paste",
+    class: "paste small",
     id: "reply",
     autocapitalize: "off",
-    placeholder: "Geminiの答えをここに貼る",
+    placeholder: "うまくいかないときは、Geminiの答えをここに長押しで貼る",
     "aria-label": "Geminiの答え",
   });
 
@@ -524,21 +525,33 @@ function renderPaste() {
     });
   }
 
-  const copyPrompt = async () => {
-    if (!transcript.value.trim()) {
-      toast("記録を貼ってください");
+  const stepTwo = h("div", { class: "section", id: "step-answer" },
+    h("h2", {}, "2. 答えをコピーして、戻ってくる"),
+    h("p", {}, "Geminiの答えの下にあるコピーのボタンを押してから、このアプリに戻って押します。"),
+    h("button", { class: "btn primary", id: "paste-reply", onclick: () => pasteAnswer() }, "答えを貼ってカードにする"),
+    reply,
+    h("button", { class: "btn secondary", id: "make", onclick: () => makeCards() }, "欄に貼った答えをカードにする"));
+
+  // コピーとGeminiの起動は、同じタップの中で行う（iPhoneは、あとからでは別のアプリを開かせてくれない）。
+  const sendToGemini = () => {
+    const text = transcript.value.trim();
+    if (!text) {
+      toast("先に英会話の記録を貼ってください");
+      transcript.focus();
       return;
     }
-    const prompt = Logic.buildPrompt(transcript.value.trim());
-    try {
-      await navigator.clipboard.writeText(prompt);
-      toast("コピーしました。Geminiに貼って送信してください");
-    } catch (e) {
-      // 自動コピーできない環境では、依頼文を見せて手でコピーしてもらう。
+    const prompt = Logic.buildPrompt(text);
+    const copied = navigator.clipboard ? navigator.clipboard.writeText(prompt) : Promise.reject(new Error("no clipboard"));
+    window.open(GEMINI_URL, "_blank", "noopener,noreferrer");
+    copied.then(() => {
+      stepTwo.classList.add("ready");
+      toast("コピーしました。Geminiで貼り付けて送信してください");
+    }).catch(() => {
+      // 自動でコピーできない環境では、依頼文を見せて手でコピーしてもらう。
       transcript.value = prompt;
       transcript.select();
-      toast("自動でコピーできませんでした。この文をコピーしてください");
-    }
+      toast("自動でコピーできませんでした。この文をコピーしてGeminiに貼ってください");
+    });
   };
 
   const makeCards = () => {
@@ -556,19 +569,30 @@ function renderPaste() {
     }
   };
 
+  // コピーしてある答えを読み取って、そのままカードにする。
+  const pasteAnswer = async () => {
+    let text = "";
+    try {
+      text = navigator.clipboard ? await navigator.clipboard.readText() : "";
+    } catch (e) { /* 読み取りを断られた */ }
+    if (!text.trim()) {
+      reply.focus();
+      toast("読み取れませんでした。下の欄に長押しで貼ってください");
+      return;
+    }
+    reply.value = text;
+    keepDraft();
+    makeCards();
+  };
+
   show(h("div", {},
     topBar("記録を貼る"),
     h("div", { class: "section" },
-      h("h2", {}, "1. 記録を貼ってコピー"),
+      h("h2", {}, "1. 英会話の記録を貼って、Geminiへ"),
       transcript,
-      h("button", { class: "btn secondary", id: "copy", onclick: copyPrompt }, "Gemini用にコピー")),
-    h("div", { class: "section" },
-      h("h2", {}, "2. Geminiに貼って送信"),
-      h("a", { class: "btn secondary", id: "gemini", href: GEMINI_URL, target: "_blank", rel: "noopener noreferrer" }, "Geminiを開く")),
-    h("div", { class: "section" },
-      h("h2", {}, "3. 答えをコピーして、ここに貼る"),
-      reply,
-      h("button", { class: "btn primary", id: "make", onclick: makeCards }, "カードにする"))),
+      h("button", { class: "btn primary", id: "copy", onclick: sendToGemini }, "Geminiで分析する"),
+      h("p", {}, "依頼文と記録をまとめてコピーし、Geminiを開きます。Geminiでは貼り付けて送信するだけです。")),
+    stepTwo),
   tabBar("paste"));
 }
 

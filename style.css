@@ -299,3 +299,5 @@ td.empty { max-width: none; text-align: center; }
   * { transition: none !important; }
   .a, .big-flame, .combo { animation: none; }
 }
+textarea.paste.small { min-height: 12dvh; }
+#step-answer.ready { border-color: rgba(46, 229, 157, .5); box-shadow: 0 0 24px rgba(46, 229, 157, .15); }
