@@ -417,7 +417,7 @@ function renderHome() {
 
   show(h("div", { class: "home" },
     inSafariTab
-      ? h("p", { class: "warn", id: "safari-warn" }, "Safariで開いています。ホーム画面の「言えた」のアイコンから開いてください。ここで入れたカードは、アイコンから開いたアプリには出ません。")
+      ? h("p", { class: "warn", id: "safari-warn" }, "Safariで開いています。ホーム画面の「英語言えた」のアイコンから開いてください。ここで入れたカードは、アイコンから開いたアプリには出ません。")
       : null,
     header,
     state.cards.length > 0 ? levelCard(Logic.level(state.cards)) : null,

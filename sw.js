@@ -1,5 +1,5 @@
 // スマホの裏側で動く係。オフライン対応と、通知の表示を担当する。
-const CACHE = "ieta-v3";
+const CACHE = "ieta-v4";
 const FILES = [
   "./", "./index.html", "./style.css", "./vendor/ts-fsrs.umd.js", "./config.js", "./logic.js", "./app.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png",
@@ -42,7 +42,7 @@ const MESSAGES = [
 ];
 
 self.addEventListener("push", (e) => {
-  e.waitUntil(self.registration.showNotification("言えた", {
+  e.waitUntil(self.registration.showNotification("英語言えた", {
     body: MESSAGES[Math.floor(Math.random() * MESSAGES.length)],
     icon: "icons/icon-192.png",
     tag: "daily",

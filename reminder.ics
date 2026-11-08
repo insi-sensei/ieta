@@ -3,7 +3,7 @@ VERSION:2.0
 PRODID:-//ieta//daily reminder//JA
 CALSCALE:GREGORIAN
 METHOD:PUBLISH
-X-WR-CALNAME:言えた
+X-WR-CALNAME:英語言えた
 BEGIN:VTIMEZONE
 TZID:Asia/Tokyo
 BEGIN:STANDARD
@@ -19,7 +19,7 @@ DTSTAMP:20261108T000000Z
 DTSTART;TZID=Asia/Tokyo:20261108T230000
 DURATION:PT10M
 RRULE:FREQ=DAILY
-SUMMARY:🔥 言えた：連続記録を守ろう
+SUMMARY:🔥 英語言えた：連続記録を守ろう
 DESCRIPTION:今日の英語、まだなら今のうちに。5分で終わります。\nhttps://insi-sensei.github.io/ieta/
 URL:https://insi-sensei.github.io/ieta/
 TRANSP:TRANSPARENT
