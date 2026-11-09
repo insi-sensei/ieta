@@ -298,3 +298,10 @@ td.empty { max-width: none; text-align: center; }
 }
 textarea.paste.small { min-height: 12dvh; }
 #step-answer.ready { border-color: rgba(46, 229, 157, .5); box-shadow: 0 0 24px rgba(46, 229, 157, .15); }
+.day-pick { display: flex; justify-content: space-between; align-items: center; text-align: left; }
+.day-count { color: var(--muted); font-weight: 800; }
+
+/* 開いた直後は隠しておき、画面の大きさが落ち着いてから出す（iPhoneで初めて開いたときのぶれを見せない） */
+#app, .tabbar { transition: opacity .25s ease; }
+html:not(.ready) #app, html:not(.ready) .tabbar { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { #app, .tabbar { transition: none; } }

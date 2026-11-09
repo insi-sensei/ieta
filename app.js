@@ -424,7 +424,10 @@ function renderHome() {
     hero = h("div", { class: "hero-card glass" },
       ring(1, 1, h("div", { class: "ring-check" }, icon("check", "icon big"))),
       h("p", { class: "hero-text" }, "今日の分は終わりです。"),
-      h("p", { class: "hero-sub" }, ready > 0 ? "また明日。次の英会話の記録も貼っておこう。" : "英語を入れると練習に出ます。"),
+      h("p", { class: "hero-sub" }, ready > 0 ? "もう一度練習しても、新しい記録を貼ってもOK。" : "英語を入れると練習に出ます。"),
+      Logic.practiceDays(state.cards).length > 0
+        ? h("button", { class: "btn primary", id: "practice", onclick: () => startPractice() }, "もう一度練習する")
+        : null,
       h("button", { class: "btn secondary", id: "paste-cta", onclick: renderPaste }, "英会話の記録を貼る"));
   }
 
@@ -566,11 +569,12 @@ function renderPaste() {
       return;
     }
     const prompt = Logic.buildPrompt(text);
+    // Geminiはアプリから自動では開かない。ホーム画面のアプリから外のサイトを開くと、
+    // iPhoneはアプリの上に白いブラウザを重ねてしまい、戻ってきたときに画面が白く見えるため。
     const copied = navigator.clipboard ? navigator.clipboard.writeText(prompt) : Promise.reject(new Error("no clipboard"));
-    window.open(GEMINI_URL, "_blank", "noopener,noreferrer");
     copied.then(() => {
       stepTwo.classList.add("ready");
-      toast("コピーしました。Geminiで貼り付けて送信してください");
+      toast("コピーしました。Geminiアプリを開いて、貼り付けて送信してください");
     }).catch(() => {
       // 自動でコピーできない環境では、依頼文を見せて手でコピーしてもらう。
       transcript.value = prompt;
@@ -583,7 +587,8 @@ function renderPaste() {
     try {
       const result = Logic.parseReply(reply.value);
       const date = Logic.today();
-      const added = Logic.pickNew(state.cards, result.cards).map((d) => Logic.newCard(d, date));
+      const batch = Date.now().toString(36);
+      const added = Logic.pickNew(state.cards, result.cards).map((d) => Logic.newCard({ ...d, batch }, date));
       state.cards.push(...added);
       save();
       saveDraft({ transcript: "", reply: "" });
@@ -615,8 +620,11 @@ function renderPaste() {
     h("div", { class: "section" },
       h("h2", {}, "1. 英会話の記録を貼って、Geminiへ"),
       transcript,
-      h("button", { class: "btn primary", id: "copy", onclick: sendToGemini }, "Geminiで分析する"),
-      h("p", {}, "依頼文と記録をまとめてコピーし、Geminiを開きます。Geminiでは貼り付けて送信するだけです。")),
+      h("button", { class: "btn primary", id: "copy", onclick: sendToGemini }, "Gemini用にコピーする"),
+      h("p", {}, "依頼文と記録をまとめてコピーします。コピーしたら、Geminiアプリを開いて貼り付けて送信します。"),
+      h("p", {}, "Geminiアプリがない人は ",
+        h("a", { id: "gemini-web", href: GEMINI_URL, target: "_blank", rel: "noopener noreferrer" }, "ブラウザ版のGemini"),
+        " を使います。戻るときは、左上の「完了」を押します。")),
     stepTwo),
   tabBar("paste"));
 }
@@ -645,13 +653,50 @@ function renderResult(result, added) {
     h("div", { class: "bar-top" }, heading),
     result.summary ? h("p", { class: "lead" }, result.summary) : null,
     rows.length === 0 ? h("p", { class: "empty" }, "新しく覚えるものはありませんでした。") : rows,
+    rows.length > 0
+      ? h("button", { class: "btn danger", id: "undo-batch", onclick: () => {
+        if (!confirm(`この回の${added.length}枚を、全部取り消しますか？`)) return;
+        added.forEach(deleteCard);
+        sync();
+        toast(`${added.length}枚を取り消しました`);
+        renderHome();
+      } }, "この回のカードを全部取り消す")
+      : null,
     h("div", { class: "sticky" },
       h("button", { class: "btn primary", id: "done", onclick: renderHome }, "完了"))));
 }
 
+// ---- 貼った回ごとにまとめて消す ----
+function renderBatches() {
+  const groups = Logic.batches(state.cards);
+  const back = () => renderList();
+  const label = (g) => {
+    const [, m, d] = g.date.split("-").map(Number);
+    if (!g.at) return `${m}月${d}日に作った分`;
+    const t = new Date(g.at);
+    return `${m}月${d}日 ${t.getHours()}:${String(t.getMinutes()).padStart(2, "0")} に貼った回`;
+  };
+  show(h("div", {},
+    topBar("貼った回ごとに消す", back),
+    h("p", { class: "lead" }, "同じ記録を2回貼ってしまったときなどに、その回のカードをまとめて消せます。手で1つずつ入れたカードは出てきません。"),
+    groups.length === 0 ? h("p", { class: "empty" }, "まだ貼った回はありません。") : null,
+    groups.map((g) => h("div", { class: "section batch", "data-batch": g.key },
+      h("h2", {}, `${label(g)}・${g.cards.length}枚`),
+      h("p", {}, g.cards.slice(0, 3).map((c) => c.ja || c.en).join("／") + (g.cards.length > 3 ? " ほか" : "")),
+      h("button", { class: "btn danger", onclick: () => {
+        if (!confirm(`${label(g)}の${g.cards.length}枚を、全部消しますか？`)) return;
+        g.cards.forEach(deleteCard);
+        sync();
+        toast(`${g.cards.length}枚を消しました`);
+        renderBatches();
+      } }, `この回の${g.cards.length}枚を消す`)))),
+  tabBar("list"));
+}
+
 // ---- 練習 ----
-function startSession(queue) {
-  renderQuestion({ pending: [...queue], total: queue.length, cleared: 0, answered: [], firstOk: 0, combo: 0 });
+// free が true のときは「もう一度練習」。記憶の計算と連続日数には入れない。
+function startSession(queue, free = false) {
+  renderQuestion({ pending: [...queue], total: queue.length, cleared: 0, answered: [], firstOk: 0, combo: 0, free });
 }
 
 const kindChip = (card) => h("span", { class: `chip ${card.kind}` }, card.kind === "word" ? "単語" : "文");
@@ -715,8 +760,8 @@ function gradeCard(session, ok) {
   const [card, ...rest] = session.pending;
   const first = !session.answered.includes(card.id);
 
-  // 記憶の計算に入れるのは、その日の最初の答えだけ。やり直しは同じ日の練習として扱う。
-  if (first) {
+  // 記憶の計算に入れるのは、その日の最初の答えだけ。やり直しと「もう一度練習」は入れない。
+  if (first && !session.free) {
     const updated = Logic.grade(card, ok, Logic.today());
     state.cards = state.cards.map((c) => (c.id === card.id ? updated : c));
     save();
@@ -749,7 +794,51 @@ function confetti() {
   }));
 }
 
+function finishPractice(session) {
+  const rate = Math.round((session.firstOk / session.total) * 100);
+  show(h("div", { class: "home finish" },
+    confetti(),
+    h("div", { class: "hero" },
+      h("div", { class: "big-flame" }, icon("flame", "icon huge")),
+      h("p", { class: "cheer" }, "もう一度練習、おつかれさま！"),
+      h("p", { class: "hero-sub" }, `${session.total} 問、全部できました。何回でも練習できます。`)),
+    h("div", { class: "tiles" },
+      h("div", { class: "tile glass" }, h("strong", {}, String(session.total)), h("span", {}, "練習した")),
+      h("div", { class: "tile glass good" }, h("strong", {}, `${rate}%`), h("span", {}, "1回でできた"))),
+    h("div", { class: "actions" },
+      h("button", { class: "btn primary", id: "practice-again", onclick: () => startPractice() }, "ほかの日も練習する"),
+      h("button", { class: "btn secondary", id: "home", onclick: renderHome }, "閉じる"))));
+}
+
+// 日付を選んで、その日に入れたカードを練習する。
+function renderPracticePicker() {
+  const today = Logic.today();
+  const days = Logic.practiceDays(state.cards);
+  const label = (date) => {
+    const [, m, d] = date.split("-").map(Number);
+    if (date === today) return `${m}月${d}日（今日）`;
+    if (date === Logic.addDays(today, -1)) return `${m}月${d}日（昨日）`;
+    return `${m}月${d}日`;
+  };
+  show(h("div", {},
+    topBar("日付を選んで練習"),
+    h("p", { class: "lead" }, "その日に入れたカードを、もう一度練習します。何回でもできて、次の出題日はずれません。"),
+    days.length === 0 ? h("p", { class: "empty" }, "まだカードがありません。") : null,
+    h("div", { class: "stack" }, days.map((d) => h("button", {
+      class: "btn secondary day-pick",
+      "data-day": d.date,
+      onclick: () => startSession(Logic.practiceFor(state.cards, d.date), true),
+    }, h("span", {}, label(d.date)), h("span", { class: "day-count" }, `${d.count}枚`))))),
+  tabBar("home"));
+}
+
+const startPractice = renderPracticePicker;
+
 function finishSession(session) {
+  if (session.free) {
+    finishPractice(session);
+    return;
+  }
   markDone();
   sync();
   const days = Logic.streak(state.doneDays, Logic.today());
@@ -912,6 +1001,7 @@ function renderList(filter = "all", query = "", sort = { key: "createdAt", dir: 
   show(h("div", { class: "fill" },
     topBar("単語帳"),
     search,
+    h("button", { class: "link", id: "batches", onclick: renderBatches }, "貼った回ごとにまとめて消す"),
     h("div", { class: "chips" }, filters.map(([value, label]) => h("button", {
       "aria-pressed": String(filter === value),
       onclick: () => renderList(value, search.value, sort),
@@ -1095,18 +1185,50 @@ function importFile() {
 // ---- 起動 ----
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+// 画面が空のまま残ったら、ホームを描き直す（iPhoneでほかのアプリから戻ったときの白い画面を防ぐ）。
+function ensureScreen() {
+  if (!app.firstElementChild) renderHome();
+}
+
+// 途中でエラーが起きて何も描けなかったときも、真っ白にせず、開き直す手段を出す。
+window.addEventListener("error", () => {
+  if (app.firstElementChild) return;
+  app.replaceChildren(h("div", { class: "hero-card glass" },
+    h("p", { class: "hero-text" }, "表示できませんでした"),
+    h("p", { class: "hero-sub" }, "カードは消えていません。"),
+    h("button", { class: "btn primary", id: "reload", onclick: () => location.reload() }, "開き直す")));
+});
+window.addEventListener("pageshow", ensureScreen);
+
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") sync();
+  if (document.visibilityState === "visible") {
+    ensureScreen();
+    sync();
+  }
   // iPhoneは裏に回ったアプリをすぐ止めることがあるので、その前に控えを残す。
   else writeSnapshot();
 });
+// 画面の大きさ（上下のすき間など）が落ち着いてから表示する。
+let revealed = false;
+function revealApp() {
+  if (revealed) return;
+  revealed = true;
+  requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => document.documentElement.classList.add("ready"), 120)));
+}
+// 何かあっても、必ず表示はする
+setTimeout(() => document.documentElement.classList.add("ready"), 3500);
+
 const firstVisit = !onboarded() && state.cards.length === 0;
-if (!firstVisit) renderHome();
+if (!firstVisit) {
+  renderHome();
+  revealApp();
+}
 Promise.all([recover(), recoverToken(), detectServer()]).then(() => {
   // データが変わったときの描き直しは recover() が行うので、ここでは描き直さない。
   if (firstVisit) {
     if (state.cards.length === 0) renderOnboarding();
     else renderHome();
+    revealApp();
   }
   writeSnapshot();
   sync();

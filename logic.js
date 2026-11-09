@@ -33,8 +33,10 @@ const Logic = (() => {
     return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000;
   }
 
-  function newCard({ ja = "", en = "", example = "", said = "", why = "", kind = "speak" }, date, now = Date.now()) {
+  // batch は、同じ回に貼って作ったカードにつける印。あとで回ごとにまとめて消せる。
+  function newCard({ ja = "", en = "", example = "", said = "", why = "", kind = "speak", batch = "" }, date, now = Date.now()) {
     return {
+      ...(batch ? { batch } : {}),
       id: `${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`,
       ja: ja.trim(),
       en: en.trim(),
@@ -75,6 +77,7 @@ const Logic = (() => {
     };
     if (DATE.test(c.lastReview || "")) card.lastReview = c.lastReview;
     if (DATE.test(c.firstReview || "")) card.firstReview = c.firstReview;
+    if (typeof c.batch === "string" && ID.test(c.batch)) card.batch = c.batch;
     if (c.memory && typeof c.memory === "object" && Number.isFinite(c.memory.stability)) card.memory = c.memory;
     return card;
   }
@@ -87,20 +90,35 @@ const Logic = (() => {
     return daysBetween(card.lastReview, date) / Math.max(1, daysBetween(card.lastReview, card.due));
   }
 
-  // 今日の問題を決める。忘れかけている復習を先に出し、余った枠で新しいカードを始める。
+  // 今日の問題を決める。忘れかけている復習を先に出し、今日入れたカードは必ず出す。
+  // 前から残っている新しいカードは、余った枠でだけ始める（一度に増やすと後の復習が溢れるため）。
   function buildQueue(cards, date, limit = DAILY_LIMIT, newLimit = NEW_PER_DAY) {
     const ready = cards.filter(isReady);
     const reviews = ready
       .filter((c) => c.lastReview && c.due <= date)
       .sort((a, b) => overdueRatio(b, date) - overdueRatio(a, date))
       .slice(0, limit);
-    const startedToday = ready.filter((c) => c.firstReview === date).length;
-    const room = Math.max(0, Math.min(limit - reviews.length, newLimit - startedToday));
     const fresh = ready
       .filter((c) => !c.lastReview)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .slice(0, room);
-    return [...reviews, ...fresh];
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const addedToday = fresh.filter((c) => c.createdAt === date);
+    const startedToday = ready.filter((c) => c.firstReview === date).length;
+    const room = Math.max(0, Math.min(limit - reviews.length, newLimit - startedToday));
+    const backlog = fresh.filter((c) => c.createdAt !== date).slice(0, room);
+    return [...reviews, ...addedToday, ...backlog];
+  }
+
+  // 「もう一度練習」で選べる日付。カードを入れた日ごとに、新しい日から並べる。
+  function practiceDays(cards) {
+    const counts = new Map();
+    for (const c of cards) if (isReady(c)) counts.set(c.createdAt, (counts.get(c.createdAt) || 0) + 1);
+    return [...counts].map(([date, count]) => ({ date, count })).sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  // 選んだ日に入れたカードを、入れた順に練習する。
+  // この練習は記憶の計算に入れないので、何回やっても次の出題日はずれない。
+  function practiceFor(cards, day) {
+    return cards.filter((c) => isReady(c) && c.createdAt === day);
   }
 
   let scheduler;
@@ -364,6 +382,19 @@ ${transcript}
     return { doneDays, dueDates };
   }
 
+  // 貼った回ごとにまとめる。印のない前のカードは、AIが作ったもの（said か why がある）を日付ごとにまとめる。
+  // 手で1つずつ入れたカードは含めない。
+  function batches(cards) {
+    const groups = new Map();
+    for (const c of cards) {
+      const key = c.batch ? `batch:${c.batch}` : (c.said || c.why ? `day:${c.createdAt}` : null);
+      if (!key) continue;
+      if (!groups.has(key)) groups.set(key, { key, date: c.createdAt, at: c.batch ? parseInt(c.batch, 36) : 0, cards: [] });
+      groups.get(key).cards.push(c);
+    }
+    return [...groups.values()].sort((a, b) => b.date.localeCompare(a.date) || b.at - a.at);
+  }
+
   function toCSV(cards) {
     const cell = (s) => `"${String(s).replace(/"/g, '""')}"`;
     const rows = cards.filter(isReady).map((c) => [c.ja, c.en, c.example].map(cell).join(","));
@@ -390,8 +421,8 @@ ${transcript}
 
   return {
     DAILY_LIMIT, NEW_PER_DAY,
-    today, addDays, newCard, isReady, buildQueue, grade, streak, merge, pickNew,
-    cleanCard, buildPrompt, parseReply, searchCards, sortCards, oldSnapshots, restoreSnapshot, week, progress, cheer, statusForServer, level, levelFromXp, XP_PER_REVIEW, toCSV, parseBackup,
+    today, addDays, newCard, isReady, buildQueue, practiceDays, practiceFor, grade, streak, merge, pickNew,
+    cleanCard, buildPrompt, parseReply, searchCards, sortCards, oldSnapshots, restoreSnapshot, week, progress, cheer, statusForServer, batches, level, levelFromXp, XP_PER_REVIEW, toCSV, parseBackup,
   };
 })();
 
