@@ -419,8 +419,17 @@ ${transcript}
     };
   }
 
+  // どのスマホで、どう開いているか。案内の文を出し分けるために使う。
+  // installed は、ホーム画面のアイコンから（アプリとして）開いているか。
+  // iPhone はブラウザとアイコンでデータが別々になる。Android の Chrome は同じデータを使う。
+  function platform(userAgent, installed) {
+    const ua = String(userAgent || "");
+    const os = /iPhone|iPad|iPod/.test(ua) ? "ios" : /Android/.test(ua) ? "android" : "other";
+    return { os, installed: Boolean(installed), separateData: os === "ios" && !installed };
+  }
+
   return {
-    DAILY_LIMIT, NEW_PER_DAY,
+    DAILY_LIMIT, NEW_PER_DAY, platform,
     today, addDays, newCard, isReady, buildQueue, practiceDays, practiceFor, grade, streak, merge, pickNew,
     cleanCard, buildPrompt, parseReply, searchCards, sortCards, oldSnapshots, restoreSnapshot, week, progress, cheer, statusForServer, batches, level, levelFromXp, XP_PER_REVIEW, toCSV, parseBackup,
   };

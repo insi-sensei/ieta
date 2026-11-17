@@ -148,8 +148,18 @@ async function listSnapshots() {
   }
 }
 
-// iPhoneで、ホーム画面のアイコンではなくSafariで開いているか。データの保存場所が別になる。
-const inSafariTab = /iPhone|iPad/.test(navigator.userAgent) && navigator.standalone === false;
+// どのスマホで、ホーム画面のアイコンから開いているか。
+// iPhoneは navigator.standalone、Androidは display-mode で分かる。
+const device = Logic.platform(navigator.userAgent,
+  navigator.standalone === true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches));
+// iPhoneで、アイコンではなくSafariで開いているか。データの保存場所が別になる。
+const inSafariTab = device.separateData;
+// ホーム画面への追加のしかた（端末ごと）。
+const installHint = device.os === "android"
+  ? "Chromeの右上「︙」→「ホーム画面に追加」（または「アプリをインストール」）で追加し、アイコンから開き直してください。"
+  : "いまはSafariで開いています。共有ボタン →「ホーム画面に追加」で追加し、アイコンから開き直してください。";
+// 通知を許可し直す場所（端末ごと）。
+const settingsName = device.os === "android" ? "スマホの設定 → アプリ → 英語言えた → 通知" : "iPhoneの設定 → 通知";
 
 function getLocal(key) {
   try {
@@ -500,19 +510,19 @@ function renderOnboarding() {
     }
   });
 
+  // iPhone・Androidのブラウザで開いているときだけ、ホーム画面への追加を案内する（PCでは出さない）。
+  const needInstall = device.os !== "other" && !device.installed;
   show(h("div", { class: "onboard" },
     h("div", { class: "hero-card glass" },
       h("div", { class: "welcome" }, icon("flame", "icon big")),
       h("p", { class: "hero-text" }, "言えなかった一言を、", h("br"), "明日には言えるようにする。"),
       h("p", { class: "hero-sub" }, "はじめに、2つだけ設定します。")),
     h("div", { class: "steps" },
-      h("div", { class: `step glass${inSafariTab ? "" : " done"}` },
+      h("div", { class: `step glass${needInstall ? "" : " done"}` },
         h("span", { class: "step-no" }, "1"),
         h("div", {},
           h("h2", {}, "ホーム画面から開く"),
-          h("p", {}, inSafariTab
-            ? "いまはSafariで開いています。共有ボタン →「ホーム画面に追加」で追加し、アイコンから開き直してください。"
-            : "OK。ホーム画面のアプリとして開いています。"))),
+          h("p", {}, needInstall ? installHint : "OK。ホーム画面のアプリとして開いています。"))),
       notifyStep),
     h("button", { class: "btn secondary", id: "onboard-done", onclick: finish }, "はじめる")));
 }
@@ -1061,7 +1071,7 @@ function renderSettings() {
       snapshots),
     h("div", { class: "section" },
       h("h2", {}, "機種変更のとき"),
-      h("p", {}, "新しいiPhoneへ移すときだけ使います。"),
+      h("p", {}, "新しいスマホへ移すときだけ使います。"),
       h("button", { class: "btn secondary", id: "export", onclick: exportFile }, "ファイルに書き出す"),
       h("button", { class: "btn secondary", id: "import", onclick: importFile }, "ファイルから読み込む"),
       h("button", { class: "btn secondary", id: "csv", onclick: exportCSV }, "CSVで書き出す"))),
@@ -1101,13 +1111,13 @@ const base64ToBytes = (s) => {
 // 通知の許可は、本人がボタンを押したときにだけ求める。
 async function enablePush(hour) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-    toast("iPhoneはホーム画面に追加してから開いてください");
+    toast(device.os === "ios" ? "iPhoneはホーム画面に追加してから開いてください" : "このブラウザは通知に使えません。Chromeで開いてください");
     return false;
   }
   try {
     const permission = await Notification.requestPermission();
     if (permission !== "granted") {
-      toast("通知が許可されませんでした。iPhoneの設定 → 通知 から許可できます");
+      toast(`通知が許可されませんでした。${settingsName} から許可できます`);
       return false;
     }
     const { publicKey } = await api("push/key");
